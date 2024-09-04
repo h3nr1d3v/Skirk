@@ -20,6 +20,7 @@ from cogs.logs import LogsCog
 from cogs.translation import TranslationCog
 from cogs.help import HelpCog
 from cogs.welcome import WelcomeCog
+from cogs.anime import AnimeCog
 
 # Load environment variables
 load_dotenv()
@@ -79,6 +80,7 @@ async def main():
     await bot.add_cog(TranslationCog(bot))
     await bot.add_cog(HelpCog(bot))
     await bot.add_cog(WelcomeCog(bot))
+    await bot.add_cog(AnimeCog(bot))
 
     # Set up error handling
     await bot.add_cog(ErrorHandler(bot))
