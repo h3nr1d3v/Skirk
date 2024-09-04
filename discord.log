@@ -1,0 +1,3 @@
+2024-09-04 16:00:18,850:INFO:discord.client: logging in using static token
+2024-09-04 16:00:21,574:INFO:discord.gateway: Shard ID None has connected to Gateway (Session ID: c95d66695b94cf0678d78e92de3c6e99).
+2024-09-04 16:00:23,614:INFO:discord: Skirk#9381 has connected to Discord!
