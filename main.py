@@ -1,7 +1,5 @@
 import discord
 from discord.ext import commands
-import os
-from dotenv import load_dotenv
 import logging
 import asyncio
 from cogs.admin import AdminCog
@@ -21,9 +19,6 @@ from cogs.translation import TranslationCog
 from cogs.help import HelpCog
 from cogs.welcome import WelcomeCog
 from cogs.anime import AnimeCog
-
-# Load environment variables
-load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +44,7 @@ config_manager = ConfigManager('config.json')
 @bot.event
 async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
-    await bot.change_presence(activity=discord.Game(name="!help for commands"))
+    await bot.change_presence(activity=discord.Game(name="🌸ɪᴀ ꜱᴋʀʙᴏᴛ┊!ʜᴇʟᴘ"))
 
 
 @bot.event
@@ -66,6 +61,7 @@ async def on_message(message):
 
 async def main():
     # Load cogs
+    await bot.add_cog(WelcomeCog(bot))
     await bot.add_cog(AdminCog(bot, config_manager))
     await bot.add_cog(UserCog(bot, config_manager))
     await bot.add_cog(ModerationCog(bot, config_manager))
@@ -79,14 +75,16 @@ async def main():
     await bot.add_cog(LogsCog(bot))
     await bot.add_cog(TranslationCog(bot))
     await bot.add_cog(HelpCog(bot))
-    await bot.add_cog(WelcomeCog(bot))
     await bot.add_cog(AnimeCog(bot))
 
     # Set up error handling
     await bot.add_cog(ErrorHandler(bot))
 
-    # Run the bot
-    await bot.start(os.getenv('DISCORD_TOKEN'))
+    # Run the bot with a hardcoded token
+    # Reemplaza esto con tu token real
+    token = ''
+    print(f'Token cargado: {token}')
+    await bot.start(token)
 
 if __name__ == '__main__':
     asyncio.run(main())

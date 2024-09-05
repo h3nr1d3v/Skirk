@@ -1,4 +1,3 @@
-2024-09-04 18:25:05,145:INFO:discord.client: logging in using static token
-2024-09-04 18:25:06,203:INFO:discord.gateway: Shard ID None has connected to Gateway (Session ID: d8d34fc3263ac8d8f1edcbc307e4aba8).
-2024-09-04 18:25:08,219:INFO:discord: Skirk#9381 has connected to Discord!
-2024-09-04 18:27:54,398:WARNING:discord.http: We are being rate limited. POST https://discord.com/api/v10/channels/1106630196364329031/messages/bulk-delete responded with 429. Retrying in 2.98 seconds.
+2024-09-04 20:13:01,079:INFO:discord.client: logging in using static token
+2024-09-04 20:13:02,025:INFO:discord.gateway: Shard ID None has connected to Gateway (Session ID: d5fbeb35332deeeff0f776d630c0e2b4).
+2024-09-04 20:13:04,041:INFO:discord: Skirk#9381 has connected to Discord!
