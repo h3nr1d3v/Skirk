@@ -22,20 +22,23 @@ Este es un bot para Discord construido usando `discord.py` y varias extensiones 
 1. Clona el repositorio:
 
    ```bash
-   git clone https://github.com/nw24sh/AKAMEBOT.git
-   cd AKAMEBOT
-   
+   git clone https://github.com/h3nr1d3v/SkirkBot.git
+   cd SkirkBot
+
+   ```
+
 2. Crea un entorno virtual e instálalo:
    ```python -m venv venv
    source venv/bin/activate   # En Windows usa `venv\Scripts\activate`
    ```
 3. Instala las dependencias:
-   ```pip install -r requirements.txt```
+   `pip install -r requirements.txt`
 
 4. Configura el archivo .env en el directorio raíz con tus claves:
    ```
    DISCORD_TOKEN=YOUR_DISCORD_CHANNEL_TOKEN
    OPENAI_API_KEY=YOUR_API_KEY
+   ```
 
 Para ejecutar el bot, usa el siguiente comando:
-```python main.py```
+`python main.py`

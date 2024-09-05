@@ -1,12 +1,25 @@
 import discord
 from discord.ext import commands
-
-TicketsChannel = 1281013321679634557
+import asyncio
+import json
+from datetime import datetime
 
 
 class TicketsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.tickets_data = self.load_tickets_data()
+
+    def load_tickets_data(self):
+        try:
+            with open('tickets_data.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {"setup_message_id": None, "category_id": None, "ticket_counter": 0}
+
+    def save_tickets_data(self):
+        with open('tickets_data.json', 'w') as f:
+            json.dump(self.tickets_data, f)
 
     @commands.command()
     @commands.has_permissions(administrator=True)
@@ -18,81 +31,144 @@ class TicketsCog(commands.Cog):
 
         embed = discord.Embed(
             title="Support Tickets",
-            description="React with 🎫 to open a new support ticket!"
+            description="React with 🎫 to open a new support ticket!",
+            color=discord.Color.blue()
         )
         message = await ctx.send(embed=embed)
         await message.add_reaction('🎫')
 
-        # Store the message ID and category ID in a database or file if needed
-        # Example: store in a file (for demonstration purposes)
-        with open('ticket_setup.txt', 'w') as f:
-            f.write(f"{message.id}\n{category.id}")
+        self.tickets_data["setup_message_id"] = message.id
+        self.tickets_data["category_id"] = category.id
+        self.save_tickets_data()
+
+        await ctx.send("Ticket system has been set up successfully!")
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
         if user.bot:
             return
 
-        # Read the setup information
-        try:
-            with open('ticket_setup.txt', 'r') as f:
-                setup_message_id = int(f.readline().strip())
-                category_id = int(f.readline().strip())
-        except FileNotFoundError:
+        if reaction.message.id == self.tickets_data["setup_message_id"] and str(reaction.emoji) == '🎫':
+            await self.create_ticket(user, reaction.message.guild)
+
+    async def create_ticket(self, user, guild):
+        category = discord.utils.get(
+            guild.categories, id=self.tickets_data["category_id"])
+        if not category:
             return
 
-        if reaction.message.id == setup_message_id and str(reaction.emoji) == '🎫':
-            guild = reaction.message.guild
-            category = discord.utils.get(guild.categories, id=category_id)
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                guild.me: discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True)
-            }
-            channel = await guild.create_text_channel(f'ticket-{user.name}', category=category, overwrites=overwrites)
-            await channel.send(f"{user.mention} Welcome to your support ticket! Please describe your issue and a staff member will be with you shortly.")
-            log_channel = discord.utils.get(
-                guild.text_channels, name="ticket-logs")
-            if log_channel:
-                await log_channel.send(f"Ticket created: {channel.mention} by {user.mention}")
+        self.tickets_data["ticket_counter"] += 1
+        ticket_number = self.tickets_data["ticket_counter"]
+        self.save_tickets_data()
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(
+                read_messages=True, send_messages=True)
+        }
+        channel = await guild.create_text_channel(
+            f'ticket-{ticket_number}',
+            category=category,
+            overwrites=overwrites
+        )
+
+        embed = discord.Embed(
+            title=f"Ticket #{ticket_number}",
+            description=f"Welcome {user.mention} to your support ticket! Please describe your issue and a staff member will be with you shortly.",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Type !close to close this ticket")
+        await channel.send(embed=embed)
+
+        log_channel = discord.utils.get(
+            guild.text_channels, name="ticket-logs")
+        if log_channel:
+            await log_channel.send(f"Ticket #{ticket_number} created by {user.mention}")
 
     @commands.command()
     async def close(self, ctx):
         """Close a support ticket"""
-        if ctx.channel.name.startswith('ticket-'):
-            try:
-                # Send a confirmation message before deleting the channel
-                await ctx.send("Closing this ticket...")
-                await ctx.author.send("Your support ticket has been closed.")
-                log_channel = discord.utils.get(
-                    ctx.guild.text_channels, name="ticket-logs")
-                if log_channel:
-                    await log_channel.send(f"Ticket closed: {ctx.channel.mention}")
-                await ctx.channel.delete()
-            except discord.Forbidden:
-                await ctx.send("I do not have permission to delete this channel.")
-            except discord.HTTPException as e:
-                await ctx.send(f"An error occurred: {e}")
-        else:
+        if not ctx.channel.name.startswith('ticket-'):
             await ctx.send("This command can only be used in a ticket channel.")
+            return
+
+        confirm_message = await ctx.send("Are you sure you want to close this ticket? React with ✅ to confirm.")
+        await confirm_message.add_reaction('✅')
+
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) == '✅' and reaction.message.id == confirm_message.id
+
+        try:
+            await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
+        except asyncio.TimeoutError:
+            await ctx.send("Ticket closure cancelled.")
+            return
+
+        try:
+            transcript = await self.generate_transcript(ctx.channel)
+            await ctx.author.send("Your support ticket has been closed. Here's a transcript:", file=discord.File(transcript, "transcript.txt"))
+        except discord.Forbidden:
+            await ctx.send("I couldn't send you a DM with the transcript. Make sure your DMs are open.")
+
+        log_channel = discord.utils.get(
+            ctx.guild.text_channels, name="ticket-logs")
+        if log_channel:
+            await log_channel.send(f"Ticket {ctx.channel.name} closed by {ctx.author.mention}")
+
+        await ctx.send("Closing this ticket in 5 seconds...")
+        await asyncio.sleep(5)
+        await ctx.channel.delete()
+
+    async def generate_transcript(self, channel):
+        transcript = f"Transcript for {channel.name}\n\n"
+        async for message in channel.history(limit=None, oldest_first=True):
+            transcript += f"{message.created_at} - {message.author.name}: {message.content}\n"
+
+        with open(f"{channel.name}-transcript.txt", "w", encoding="utf-8") as f:
+            f.write(transcript)
+
+        return f"{channel.name}-transcript.txt"
 
     @commands.command()
-    async def reopen(self, ctx):
-        """Reopen a closed support ticket"""
-        if ctx.channel.name.startswith('ticket-'):
-            category = discord.utils.get(ctx.guild.categories, name="Tickets")
-            overwrites = {
-                ctx.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                ctx.author: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                ctx.guild.me: discord.PermissionOverwrite(
-                    read_messages=True, send_messages=True)
-            }
-            new_channel = await ctx.guild.create_text_channel(f'ticket-{ctx.author.name}', category=category, overwrites=overwrites)
-            await new_channel.send(f"{ctx.author.mention} Your ticket has been reopened. Please describe your issue and a staff member will be with you shortly.")
-            await ctx.send("Your ticket has been reopened.")
-        else:
+    @commands.has_permissions(administrator=True)
+    async def add_to_ticket(self, ctx, user: discord.Member):
+        """Add a user to the current ticket"""
+        if not ctx.channel.name.startswith('ticket-'):
             await ctx.send("This command can only be used in a ticket channel.")
+            return
+
+        await ctx.channel.set_permissions(user, read_messages=True, send_messages=True)
+        await ctx.send(f"{user.mention} has been added to the ticket.")
+
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def remove_from_ticket(self, ctx, user: discord.Member):
+        """Remove a user from the current ticket"""
+        if not ctx.channel.name.startswith('ticket-'):
+            await ctx.send("This command can only be used in a ticket channel.")
+            return
+
+        await ctx.channel.set_permissions(user, overwrite=None)
+        await ctx.send(f"{user.mention} has been removed from the ticket.")
+
+    @commands.command()
+    async def ticket_info(self, ctx):
+        """Display information about the current ticket"""
+        if not ctx.channel.name.startswith('ticket-'):
+            await ctx.send("This command can only be used in a ticket channel.")
+            return
+
+        embed = discord.Embed(
+            title=f"Ticket Information: {ctx.channel.name}", color=discord.Color.blue())
+        embed.add_field(name="Created At", value=ctx.channel.created_at.strftime(
+            "%Y-%m-%d %H:%M:%S"), inline=False)
+        embed.add_field(name="Creator", value=ctx.channel.members[1].mention if len(
+            ctx.channel.members) > 1 else "Unknown", inline=False)
+        embed.add_field(name="Current Members", value=", ".join(
+            [member.mention for member in ctx.channel.members if not member.bot]), inline=False)
+
+        await ctx.send(embed=embed)
 
     @commands.command()
     async def help_tickets(self, ctx):
@@ -102,13 +178,18 @@ class TicketsCog(commands.Cog):
             description="Here are the commands you can use:",
             color=discord.Color.blue()
         )
-        help_embed.add_field(name="!setup_tickets",
-                             value="Set up the ticket system.", inline=False)
+        help_embed.add_field(
+            name="!setup_tickets", value="Set up the ticket system (Admin only).", inline=False)
         help_embed.add_field(
             name="!close", value="Close the current support ticket.", inline=False)
+        help_embed.add_field(name="!add_to_ticket @user",
+                             value="Add a user to the current ticket (Admin only).", inline=False)
+        help_embed.add_field(name="!remove_from_ticket @user",
+                             value="Remove a user from the current ticket (Admin only).", inline=False)
         help_embed.add_field(
-            name="!reopen", value="Reopen a closed support ticket.", inline=False)
+            name="!ticket_info", value="Display information about the current ticket.", inline=False)
         await ctx.send(embed=help_embed)
 
-# Add this cog in your main.py file
-# bot.add_cog(TicketsCog(bot))
+
+def setup(bot):
+    bot.add_cog(TicketsCog(bot))

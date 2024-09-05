@@ -1,115 +1,138 @@
 import discord
 from discord.ext import commands
-import requests
+import aiohttp
+import asyncio
+from typing import Optional
 
 
 class AnimeCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.session = aiohttp.ClientSession()
+
+    def cog_unload(self):
+        asyncio.create_task(self.session.close())
+
+    async def fetch_image(self, ctx, endpoint: str):
+        """Fetch an image from the Nekos Best API"""
+        url = f"https://nekos.best/api/v2/{endpoint}"
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                image_url = data["results"][0]["url"]
+                embed = discord.Embed(color=discord.Color.random())
+                embed.set_image(url=image_url)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send(f"Failed to fetch {endpoint} image. Please try again later.")
 
     @commands.command()
+    @commands.is_nsfw()
     async def waifu(self, ctx):
-        """Fetch a random waifu image from Nekos Best"""
-        url = "https://nekos.best/api/v2/waifu"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch waifu image. Please try again later.")
+        """Fetch a random waifu image"""
+        await self.fetch_image(ctx, "waifu")
 
     @commands.command()
     async def neko(self, ctx):
-        """Fetch a random neko image from Nekos Best"""
-        url = "https://nekos.best/api/v2/neko"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch neko image. Please try again later.")
+        """Fetch a random neko image"""
+        await self.fetch_image(ctx, "neko")
 
     @commands.command()
-    async def trap(self, ctx):
-        """Fetch a random trap image from Nekos Best"""
-        url = "https://nekos.best/api/v2/trap"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch trap image. Please try again later.")
+    @commands.is_nsfw()
+    async def kitsune(self, ctx):
+        """Fetch a random kitsune image"""
+        await self.fetch_image(ctx, "kitsune")
 
     @commands.command()
-    async def blowjob(self, ctx):
-        """Fetch a random blowjob image from Nekos Best"""
-        url = "https://nekos.best/api/v2/blowjob"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch blowjob image. Please try again later.")
+    async def husbando(self, ctx):
+        """Fetch a random husbando image"""
+        await self.fetch_image(ctx, "husbando")
 
     @commands.command()
-    async def hentai(self, ctx):
-        """Fetch a random hentai image from Nekos Best"""
-        url = "https://nekos.best/api/v2/hentai"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch hentai image. Please try again later.")
-
-    @commands.command()
-    async def lewd(self, ctx):
-        """Fetch a random lewd image from Nekos Best"""
-        url = "https://nekos.best/api/v2/lewd"
-        response = requests.get(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            image_url = data["results"][0]["url"]
-            await ctx.send(image_url)
-        else:
-            await ctx.send("Failed to fetch lewd image. Please try again later.")
+    async def anime_quote(self, ctx):
+        """Fetch a random anime quote"""
+        url = "https://animechan.vercel.app/api/random"
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                embed = discord.Embed(
+                    title="Anime Quote", color=discord.Color.blue())
+                embed.add_field(
+                    name="Anime", value=data["anime"], inline=False)
+                embed.add_field(name="Character",
+                                value=data["character"], inline=False)
+                embed.add_field(
+                    name="Quote", value=data["quote"], inline=False)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("Failed to fetch anime quote. Please try again later.")
 
     @commands.command()
     async def anime(self, ctx, *, anime_name: str):
         """Fetch information about an anime using Jikan API"""
         url = f"https://api.jikan.moe/v4/anime?q={anime_name}&limit=1"
-        response = requests.get(url)
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data['data']:
+                    anime = data['data'][0]
+                    title = anime.get('title', 'Unknown Title')
+                    synopsis = anime.get('synopsis', 'No synopsis available.')
+                    image_url = anime.get('images', {}).get(
+                        'jpg', {}).get('large_image_url', '')
+                    score = anime.get('score', 'N/A')
+                    episodes = anime.get('episodes', 'Unknown')
+                    status = anime.get('status', 'Unknown')
 
-        if response.status_code == 200:
-            data = response.json()
-            if data['data']:
-                anime = data['data'][0]
-                title = anime.get('title', 'Unknown Title')
-                synopsis = anime.get('synopsis', 'No synopsis available.')
-                image_url = anime.get('images', {}).get(
-                    'jpg', {}).get('large_image_url', '')
+                    embed = discord.Embed(
+                        title=title, description=synopsis, color=discord.Color.purple())
+                    if image_url:
+                        embed.set_thumbnail(url=image_url)
+                    embed.add_field(name="Score", value=score, inline=True)
+                    embed.add_field(name="Episodes",
+                                    value=episodes, inline=True)
+                    embed.add_field(name="Status", value=status, inline=True)
 
-                embed = discord.Embed(
-                    title=title, description=synopsis, color=discord.Color.purple())
-                if image_url:
-                    embed.set_image(url=image_url)
-
-                await ctx.send(embed=embed)
+                    await ctx.send(embed=embed)
+                else:
+                    await ctx.send("No anime found with that name.")
             else:
-                await ctx.send("No anime found with that name.")
-        else:
-            await ctx.send("Failed to fetch anime information. Please try again later.")
+                await ctx.send("Failed to fetch anime information. Please try again later.")
 
-# Remember to add this cog in your main.py file:
-# bot.add_cog(AnimeCog(bot))
+    @commands.command()
+    async def manga(self, ctx, *, manga_name: str):
+        """Fetch information about a manga using Jikan API"""
+        url = f"https://api.jikan.moe/v4/manga?q={manga_name}&limit=1"
+        async with self.session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data['data']:
+                    manga = data['data'][0]
+                    title = manga.get('title', 'Unknown Title')
+                    synopsis = manga.get('synopsis', 'No synopsis available.')
+                    image_url = manga.get('images', {}).get(
+                        'jpg', {}).get('large_image_url', '')
+                    score = manga.get('score', 'N/A')
+                    volumes = manga.get('volumes', 'Unknown')
+                    chapters = manga.get('chapters', 'Unknown')
+                    status = manga.get('status', 'Unknown')
+
+                    embed = discord.Embed(
+                        title=title, description=synopsis, color=discord.Color.green())
+                    if image_url:
+                        embed.set_thumbnail(url=image_url)
+                    embed.add_field(name="Score", value=score, inline=True)
+                    embed.add_field(name="Volumes", value=volumes, inline=True)
+                    embed.add_field(name="Chapters",
+                                    value=chapters, inline=True)
+                    embed.add_field(name="Status", value=status, inline=True)
+
+                    await ctx.send(embed=embed)
+                else:
+                    await ctx.send("No manga found with that name.")
+            else:
+                await ctx.send("Failed to fetch manga information. Please try again later.")
+
+
+async def setup(bot):
+    await bot.add_cog(AnimeCog(bot))
