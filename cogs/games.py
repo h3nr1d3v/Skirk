@@ -2,19 +2,47 @@ import discord
 from discord.ext import commands
 import random
 import asyncio
+import json
+import os
 
 
 class GamesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.trivia_questions = [
-            {"question": "What is the capital of France?", "answer": "Paris"},
-            {"question": "Who painted the Mona Lisa?",
-                "answer": "Leonardo da Vinci"},
-            {"question": "What is the largest planet in our solar system?",
-                "answer": "Jupiter"},
-            # Add more questions here
-        ]
+        self.trivia_questions = self.load_trivia_questions()
+        self.hangman_words = self.load_hangman_words()
+        self.user_scores = self.load_user_scores()
+
+    def load_trivia_questions(self):
+        try:
+            with open('trivia_questions.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return [
+                {"question": "What is the capital of France?", "answer": "Paris"},
+                {"question": "Who painted the Mona Lisa?",
+                    "answer": "Leonardo da Vinci"},
+                {"question": "What is the largest planet in our solar system?",
+                    "answer": "Jupiter"},
+            ]
+
+    def load_hangman_words(self):
+        try:
+            with open('hangman_words.txt', 'r') as f:
+                return [word.strip().lower() for word in f.readlines()]
+        except FileNotFoundError:
+            return ["python", "programming", "computer", "algorithm", "database", "network", "software"]
+
+    def save_user_scores(self):
+        with open('user_scores.json', 'w') as f:
+            json.dump(self.user_scores, f)
+
+    def load_user_scores(self):
+        try:
+            with open('user_scores.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
 
     @commands.command()
     async def rps(self, ctx, player_choice: str):
@@ -38,6 +66,7 @@ class GamesCog(commands.Cog):
              (player_choice.lower() == "paper" and bot_choice == "rock") or \
              (player_choice.lower() == "scissors" and bot_choice == "paper"):
             result = "You win!"
+            self.update_score(ctx.author.id, 1)
         else:
             result = "I win!"
 
@@ -60,6 +89,7 @@ class GamesCog(commands.Cog):
                 return await ctx.send(f"Sorry, you took too long. The number was {number}.")
 
             if int(guess.content) == number:
+                self.update_score(ctx.author.id, 6 - i)
                 return await ctx.send(f"Congratulations! You guessed the number in {i+1} tries!")
 
             if int(guess.content) > number:
@@ -84,6 +114,7 @@ class GamesCog(commands.Cog):
             return await ctx.send(f"Sorry, you took too long. The answer was {question['answer']}.")
 
         if answer.content.lower() == question['answer'].lower():
+            self.update_score(ctx.author.id, 2)
             await ctx.send("Correct! Well done!")
         else:
             await ctx.send(f"Sorry, that's incorrect. The correct answer was {question['answer']}.")
@@ -91,9 +122,7 @@ class GamesCog(commands.Cog):
     @commands.command()
     async def hangman(self, ctx):
         """Play Hangman"""
-        words = ["python", "programming", "computer",
-                 "algorithm", "database", "network", "software"]
-        word = random.choice(words)
+        word = random.choice(self.hangman_words)
         guessed = set()
         tries = 6
 
@@ -129,6 +158,7 @@ class GamesCog(commands.Cog):
             await ctx.send(current)
 
             if '_' not in current:
+                self.update_score(ctx.author.id, tries + 1)
                 return await ctx.send(f"Congratulations! You guessed the word: {word}")
 
         await ctx.send(f"Sorry, you've run out of tries. The word was {word}.")
@@ -141,5 +171,28 @@ class GamesCog(commands.Cog):
             title="Coin Flip", description=f"The coin landed on: **{result}**", color=discord.Color.gold())
         await ctx.send(embed=embed)
 
-# Remember to add this cog in your main.py file:
-# await bot.add_cog(GamesCog(bot))
+    @commands.command(name="game_leaderboard")
+    async def game_leaderboard(self, ctx):
+        """Display the game leaderboard"""
+        sorted_scores = sorted(self.user_scores.items(),
+                               key=lambda x: x[1], reverse=True)
+        embed = discord.Embed(title="Game Leaderboard",
+                              color=discord.Color.gold())
+
+        for i, (user_id, score) in enumerate(sorted_scores[:10], start=1):
+            user = self.bot.get_user(int(user_id))
+            if user:
+                embed.add_field(name=f"{i}. {user.name}",
+                                value=f"Score: {score}", inline=False)
+
+        await ctx.send(embed=embed)
+
+    def update_score(self, user_id, points):
+        if str(user_id) not in self.user_scores:
+            self.user_scores[str(user_id)] = 0
+        self.user_scores[str(user_id)] += points
+        self.save_user_scores()
+
+
+def setup(bot):
+    bot.add_cog(GamesCog(bot))

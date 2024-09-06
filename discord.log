@@ -1,7 +1,31 @@
-2024-09-05 18:29:45,803:INFO:discord.client: logging in using static token
-2024-09-05 18:29:46,893:INFO:discord.gateway: Shard ID None has connected to Gateway (Session ID: 4187870bf3145dbfdb948c3ca7a65a73).
-2024-09-05 18:29:48,903:INFO:discord: Skirk#9381 has connected to Discord!
-2024-09-05 18:30:18,525:WARNING:discord.http: We are being rate limited. POST https://discord.com/api/v10/channels/1106630196364329031/messages/bulk-delete responded with 429. Retrying in 3.00 seconds.
-2024-09-05 18:30:21,716:WARNING:discord.http: We are being rate limited. POST https://discord.com/api/v10/channels/1106630196364329031/messages/bulk-delete responded with 429. Retrying in 2.98 seconds.
-2024-09-05 18:30:51,146:WARNING:discord.http: We are being rate limited. POST https://discord.com/api/v10/channels/1106630196364329031/messages/bulk-delete responded with 429. Retrying in 2.96 seconds.
-2024-09-05 18:30:54,268:WARNING:discord.http: We are being rate limited. POST https://discord.com/api/v10/channels/1106630196364329031/messages/bulk-delete responded with 429. Retrying in 3.00 seconds.
+2024-09-05 20:10:54,933:INFO:discord.client: logging in using static token
+2024-09-05 20:10:56,592:INFO:discord.gateway: Shard ID None has connected to Gateway (Session ID: 4d04b7b2244b00613bc687901777d505).
+2024-09-05 20:10:58,606:INFO:discord: Skirk#9381 has connected to Discord!
+2024-09-05 20:11:34,372:INFO:discord.voice_state: Connecting to voice...
+2024-09-05 20:11:34,373:INFO:discord.voice_state: Starting voice handshake... (connection attempt 1)
+2024-09-05 20:11:34,454:INFO:discord.voice_state: Voice handshake complete. Endpoint found: atlanta9332.discord.media
+2024-09-05 20:11:35,401:INFO:discord.voice_state: Voice connection complete.
+2024-09-05 20:12:01,722:ERROR:discord.voice_state: Disconnected from voice... Reconnecting in 0.42s.
+Traceback (most recent call last):
+  File "C:\Users\Ei\Documents\SkirkBOT\.venv\Lib\site-packages\discord\voice_state.py", line 598, in _poll_voice_ws
+    await self.ws.poll_event()
+  File "C:\Users\Ei\Documents\SkirkBOT\.venv\Lib\site-packages\discord\gateway.py", line 1037, in poll_event
+    raise ConnectionClosed(self.ws, shard_id=None, code=self._close_code)
+discord.errors.ConnectionClosed: Shard ID None WebSocket closed with 4006
+2024-09-05 20:12:02,146:INFO:discord.voice_state: The voice handshake is being terminated for Channel ID 1106628872147058689 (Guild ID 1106436171434827816)
+2024-09-05 20:12:02,148:INFO:discord.voice_state: Connecting to voice...
+2024-09-05 20:12:02,149:INFO:discord.voice_state: Starting voice handshake... (connection attempt 1)
+2024-09-05 20:12:02,294:INFO:discord.voice_state: Voice handshake complete. Endpoint found: atlanta9332.discord.media
+2024-09-05 20:12:04,784:INFO:discord.voice_state: Voice connection complete.
+2024-09-05 20:12:19,246:ERROR:discord.voice_state: Disconnected from voice... Reconnecting in 3.97s.
+Traceback (most recent call last):
+  File "C:\Users\Ei\Documents\SkirkBOT\.venv\Lib\site-packages\discord\voice_state.py", line 598, in _poll_voice_ws
+    await self.ws.poll_event()
+  File "C:\Users\Ei\Documents\SkirkBOT\.venv\Lib\site-packages\discord\gateway.py", line 1037, in poll_event
+    raise ConnectionClosed(self.ws, shard_id=None, code=self._close_code)
+discord.errors.ConnectionClosed: Shard ID None WebSocket closed with 4006
+2024-09-05 20:12:23,231:INFO:discord.voice_state: The voice handshake is being terminated for Channel ID 1106628872147058689 (Guild ID 1106436171434827816)
+2024-09-05 20:12:23,231:INFO:discord.voice_state: Connecting to voice...
+2024-09-05 20:12:23,231:INFO:discord.voice_state: Starting voice handshake... (connection attempt 1)
+2024-09-05 20:12:23,336:INFO:discord.voice_state: Voice handshake complete. Endpoint found: atlanta9332.discord.media
+2024-09-05 20:12:25,015:INFO:discord.voice_state: Voice connection complete.
