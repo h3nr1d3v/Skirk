@@ -26,7 +26,8 @@ SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 YOUTUBE_COOKIE = os.getenv('YOUTUBE_COOKIE')
 
 # Spotify authentication
-client_credentials_manager = SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID client_secret=SPOTIFY_CLIENT_SECRET)
+client_credentials_manager = SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 
