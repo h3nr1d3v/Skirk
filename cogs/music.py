@@ -50,7 +50,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
     async def from_url(cls, url, *, loop=None, stream=False):
         loop = loop or asyncio.get_event_loop()
         try:
-            await asyncio.sleep(random.uniform(1, 3))
             data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
             logger.info(
                 f"Data extracted: {data.get('title', 'Unknown title')}")
@@ -83,31 +82,60 @@ class MusicCog(commands.Cog):
                 return False
         return True
 
-    @commands.command()
-    async def join(self, ctx):
-        """Joins a voice channel"""
-        if not await self.ensure_voice(ctx):
-            return
-        await ctx.send("Joined the voice channel.")
+    async def search_youtube(self, query):
+        try:
+            data = await self.bot.loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
+            if 'entries' in data:
+                return data['entries']
+            return []
+        except Exception as e:
+            logger.error(f"Error in search_youtube: {e}", exc_info=True)
+            return []
 
     @commands.command()
     async def play(self, ctx, *, query):
-        """Plays a song"""
+        """Searches for a song and adds it to the queue"""
         if not await self.ensure_voice(ctx):
             return
 
         async with ctx.typing():
             try:
-                player = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
-                if player is None:
-                    return await ctx.send("Couldn't find the song. Please try again with a different query.")
-            except Exception as e:
-                logger.error(f"Error in play command: {e}", exc_info=True)
-                return await ctx.send(f"An error occurred: {str(e)}")
+                async with timeout(10):  # 10 seconds timeout for search
+                    search_results = await self.search_youtube(query)
+                    if not search_results:
+                        return await ctx.send("No results found. Please try a different search query.")
 
-            if ctx.guild.id not in self.queue:
-                self.queue[ctx.guild.id] = []
-            self.queue[ctx.guild.id].append(player)
+                options = '\n'.join(
+                    f"{i+1}. {result['title']}" for i, result in enumerate(search_results))
+                await ctx.send(f"Please choose a song by number:\n{options}\n\nType 'cancel' to cancel the selection.")
+
+                try:
+                    msg = await self.bot.wait_for('message', check=lambda m: m.author == ctx.author and m.channel == ctx.channel and (m.content.isdigit() or m.content.lower() == 'cancel'), timeout=30.0)
+                except asyncio.TimeoutError:
+                    return await ctx.send("Song selection timed out.")
+
+                if msg.content.lower() == 'cancel':
+                    return await ctx.send("Song selection cancelled.")
+
+                try:
+                    choice = int(msg.content)
+                    if choice < 1 or choice > len(search_results):
+                        return await ctx.send("Invalid choice. Please try again.")
+                except ValueError:
+                    return await ctx.send("Invalid input. Please enter a number.")
+
+                selected_song = search_results[choice - 1]
+                player = await YTDLSource.from_url(selected_song['webpage_url'], loop=self.bot.loop, stream=True)
+
+                if player is None:
+                    return await ctx.send("Couldn't process the song. Please try again with a different query.")
+
+                if ctx.guild.id not in self.queue:
+                    self.queue[ctx.guild.id] = []
+                self.queue[ctx.guild.id].append(player)
+
+            except asyncio.TimeoutError:
+                return await ctx.send("The search operation timed out. Please try again.")
 
         if not ctx.voice_client.is_playing():
             await self.play_next(ctx)
@@ -163,7 +191,7 @@ class MusicCog(commands.Cog):
         if ctx.guild.id not in self.queue or not self.queue[ctx.guild.id]:
             return await ctx.send("The queue is empty.")
         queue_list = "\n".join(
-            [f"{i+1}. {song.title}" for i, song in enumerate(self.queue[ctx.guild.id])])
+            f"{i+1}. {song.title}" for i, song in enumerate(self.queue[ctx.guild.id]))
         await ctx.send(f"Current queue:\n{queue_list}")
 
     @commands.command()
@@ -185,13 +213,6 @@ class MusicCog(commands.Cog):
             await ctx.send(f"Now playing: {player.title}")
         else:
             await ctx.send("Nothing is playing right now.")
-
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member, before, after):
-        if member == self.bot.user and after.channel is None:
-            guild = before.channel.guild
-            self.queue[guild.id] = []
-            self.now_playing.pop(guild.id, None)
 
 
 def setup(bot):
