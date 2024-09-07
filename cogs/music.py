@@ -42,7 +42,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get('title')
-        self.url = ""
+        self.url = data.get('url')
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=False):
@@ -51,8 +51,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if 'entries' in data:
             # take first item from a playlist
             data = data['entries'][0]
-        filename = data['title'] if stream else ytdl.prepare_filename(data)
-        return filename
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
 
 class MusicCog(commands.Cog):
@@ -78,7 +78,7 @@ class MusicCog(commands.Cog):
                 data = await resp.json()
                 embed = discord.Embed(title="Tracks found", description="\n".join(
                     [f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(tracks)]))
-                embed.set_image(url=data['url'])
+                embed.set_image(url=data['results'][0]['url'])
                 await ctx.send(embed=embed)
 
     async def play_music(self, ctx):
@@ -95,12 +95,21 @@ class MusicCog(commands.Cog):
         voice_client.stop()
 
         try:
-            filename = await YTDLSource.from_url(self.current['external_urls']['spotify'], loop=self.bot.loop)
-            voice_client.play(discord.FFmpegPCMAudio(
-                executable="ffmpeg", source=filename))
+            query = f"{self.current['name']} {self.current['artists'][0]['name']}"
+            player = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
+            voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(
+                self.play_next(ctx), self.bot.loop))
             await ctx.send(f"Now playing: {self.current['name']} by {self.current['artists'][0]['name']}")
         except Exception as e:
             await ctx.send(f"An error occurred: {str(e)}")
+
+    async def play_next(self, ctx):
+        if self.loop:
+            self.queue.append(self.current)
+        if self.queue:
+            await self.play_music(ctx)
+        else:
+            await ctx.send("Queue is empty. Playback finished.")
 
     @commands.command(name='play')
     async def play(self, ctx, *, query):
@@ -127,7 +136,6 @@ class MusicCog(commands.Cog):
     async def skip(self, ctx):
         if ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await self.play_music(ctx)
             await ctx.send("Skipped to next track.")
 
     @commands.command(name='queue')
@@ -151,8 +159,8 @@ class MusicCog(commands.Cog):
         else:
             await ctx.send("You need to be in a voice channel to use this command.")
 
-    @commands.command(name='bucle')
-    async def bucle(self, ctx):
+    @commands.command(name='loop')
+    async def loop(self, ctx):
         self.loop = not self.loop
         await ctx.send(f"Loop {'enabled' if self.loop else 'disabled'}.")
 
@@ -164,4 +172,4 @@ class MusicCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(Music(bot))
+    await bot.add_cog(MusicCog(bot))
