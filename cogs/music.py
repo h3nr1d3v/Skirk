@@ -1,159 +1,166 @@
-import os
 import discord
 from discord.ext import commands
+import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+from aiohttp import ClientSession
 import asyncio
-import aiohttp
-from discord import FFmpegPCMAudio
-from discord.utils import get
 import random
+from youtube_dl import YoutubeDL
 
-# Spotify configuration
+# Spotify setup
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 
+spotify_auth = SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+spotify = spotipy.Spotify(client_credentials_manager=spotify_auth)
 
-class MusicCog(commands.Cog):
+# YouTube setup
+ytdl_format_options = {
+    'format': 'bestaudio/best',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0'
+}
+
+ffmpeg_options = {
+    'options': '-vn'
+}
+
+ytdl = YoutubeDL(ytdl_format_options)
+
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = ""
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+        if 'entries' in data:
+            # take first item from a playlist
+            data = data['entries'][0]
+        filename = data['title'] if stream else ytdl.prepare_filename(data)
+        return filename
+
+
+class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.spotify = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
-            client_id=SPOTIFY_CLIENT_ID,
-            client_secret=SPOTIFY_CLIENT_SECRET
-        ))
         self.queue = []
-        self.current_song = None
-        self.is_playing = False
-        self.is_looping = False
+        self.current = None
+        self.loop = False
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        ]
 
-    async def get_nekos_image(self, endpoint):
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f'https://nekos.best/api/v2/{endpoint}') as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data['results'][0]['url']
-                return None
+    async def search_spotify(self, query):
+        results = spotify.search(q=query, type='track', limit=5)
+        tracks = results['tracks']['items']
+        return tracks
 
-    @commands.command()
-    async def join(self, ctx):
-        if ctx.author.voice is None:
-            await ctx.send("You're not connected to a voice channel.")
+    async def send_banner(self, ctx, tracks):
+        async with ClientSession(headers={'User-Agent': random.choice(self.user_agents)}) as session:
+            async with session.get(f'https://nekos.best/api/v2/music') as resp:
+                data = await resp.json()
+                embed = discord.Embed(title="Tracks found", description="\n".join(
+                    [f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(tracks)]))
+                embed.set_image(url=data['url'])
+                await ctx.send(embed=embed)
+
+    async def play_music(self, ctx):
+        if not self.queue:
+            await ctx.send("No songs in the queue!")
             return
 
+        self.current = self.queue.pop(0)
         voice_channel = ctx.author.voice.channel
         if ctx.voice_client is None:
             await voice_channel.connect()
-        else:
-            await ctx.voice_client.move_to(voice_channel)
 
-    @commands.command()
+        voice_client = ctx.voice_client
+        voice_client.stop()
+
+        try:
+            filename = await YTDLSource.from_url(self.current['external_urls']['spotify'], loop=self.bot.loop)
+            voice_client.play(discord.FFmpegPCMAudio(
+                executable="ffmpeg", source=filename))
+            await ctx.send(f"Now playing: {self.current['name']} by {self.current['artists'][0]['name']}")
+        except Exception as e:
+            await ctx.send(f"An error occurred: {str(e)}")
+
+    @commands.command(name='play')
+    async def play(self, ctx, *, query):
+        await asyncio.sleep(random.uniform(1, 3))  # Add a random delay
+        tracks = await self.search_spotify(query)
+        await self.send_banner(ctx, tracks)
+        self.queue.append(tracks[0])  # Add first track to the queue
+        if not ctx.voice_client or not ctx.voice_client.is_playing():
+            await self.play_music(ctx)
+
+    @commands.command(name='pause')
+    async def pause(self, ctx):
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.pause()
+            await ctx.send("Music paused.")
+
+    @commands.command(name='resume')
+    async def resume(self, ctx):
+        if ctx.voice_client.is_paused():
+            ctx.voice_client.resume()
+            await ctx.send("Resuming music.")
+
+    @commands.command(name='skip')
+    async def skip(self, ctx):
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+            await self.play_music(ctx)
+            await ctx.send("Skipped to next track.")
+
+    @commands.command(name='queue')
+    async def queue(self, ctx):
+        if self.queue:
+            await ctx.send("Current Queue:\n" + "\n".join([f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(self.queue)]))
+        else:
+            await ctx.send("Queue is empty.")
+
+    @commands.command(name='leave')
     async def leave(self, ctx):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
-            self.queue.clear()
-            self.current_song = None
-            self.is_playing = False
+            await ctx.send("Disconnected from voice channel.")
 
-    @commands.command()
-    async def play(self, ctx, *, query):
-        if ctx.voice_client is None:
-            await self.join(ctx)
+    @commands.command(name='join')
+    async def join(self, ctx):
+        if ctx.author.voice:
+            channel = ctx.author.voice.channel
+            await channel.connect()
+        else:
+            await ctx.send("You need to be in a voice channel to use this command.")
 
-        results = self.spotify.search(q=query, type='track', limit=5)
-        tracks = results['tracks']['items']
-
-        if not tracks:
-            await ctx.send("No songs found.")
-            return
-
-        embed = discord.Embed(title="Search Results",
-                              color=discord.Color.blue())
-        for i, track in enumerate(tracks, start=1):
-            embed.add_field(name=f"{i}. {track['name']} - {track['artists'][0]['name']}",
-                            value=f"Duration: {track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}",
-                            inline=False)
-
-        image_url = await self.get_nekos_image('neko')
-        if image_url:
-            embed.set_image(url=image_url)
-
-        message = await ctx.send(embed=embed)
-
-        def check(m):
-            return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit() and 1 <= int(m.content) <= len(tracks)
-
-        try:
-            msg = await self.bot.wait_for('message', check=check, timeout=30.0)
-            selected_track = tracks[int(msg.content) - 1]
-            self.queue.append(selected_track)
-            await ctx.send(f"Added to queue: {selected_track['name']} - {selected_track['artists'][0]['name']}")
-
-            if not self.is_playing:
-                await self.play_next(ctx)
-        except asyncio.TimeoutError:
-            await message.delete()
-            await ctx.send("Selection timed out.")
-
-    async def play_next(self, ctx):
-        if not self.queue:
-            self.is_playing = False
-            return
-
-        if not self.is_looping:
-            self.current_song = self.queue.pop(0)
-
-        ctx.voice_client.play(FFmpegPCMAudio(self.current_song['preview_url']),
-                              after=lambda e: self.bot.loop.create_task(self.play_next(ctx)))
-        self.is_playing = True
-
-        embed = discord.Embed(
-            title="Now Playing", description=f"{self.current_song['name']} - {self.current_song['artists'][0]['name']}", color=discord.Color.green())
-        image_url = await self.get_nekos_image('waifu')
-        if image_url:
-            embed.set_image(url=image_url)
-        await ctx.send(embed=embed)
-
-    @commands.command()
-    async def pause(self, ctx):
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
-            await ctx.send("Paused ⏸️")
-
-    @commands.command()
-    async def resume(self, ctx):
-        if ctx.voice_client and ctx.voice_client.is_paused():
-            ctx.voice_client.resume()
-            await ctx.send("Resumed ▶️")
-
-    @commands.command()
-    async def skip(self, ctx):
-        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-            ctx.voice_client.stop()
-            await ctx.send("Skipped ⏭️")
-            await self.play_next(ctx)
-
-    @commands.command()
-    async def queue(self, ctx):
-        if not self.queue:
-            await ctx.send("The queue is empty.")
-            return
-
-        embed = discord.Embed(title="Queue", color=discord.Color.blue())
-        for i, track in enumerate(self.queue, start=1):
-            embed.add_field(name=f"{i}. {track['name']} - {track['artists'][0]['name']}",
-                            value=f"Duration: {track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}",
-                            inline=False)
-
-        image_url = await self.get_nekos_image('kitsune')
-        if image_url:
-            embed.set_image(url=image_url)
-
-        await ctx.send(embed=embed)
-
-    @commands.command()
+    @commands.command(name='bucle')
     async def bucle(self, ctx):
-        self.is_looping = not self.is_looping
-        await ctx.send(f"Looping is now {'enabled' if self.is_looping else 'disabled'} 🔁")
+        self.loop = not self.loop
+        await ctx.send(f"Loop {'enabled' if self.loop else 'disabled'}.")
+
+    @commands.command(name='reboot')
+    async def reboot(self, ctx):
+        if self.current:
+            await self.play_music(ctx)
+            await ctx.send("Rebooting current song.")
 
 
 async def setup(bot):
