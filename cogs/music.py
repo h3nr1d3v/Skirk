@@ -1,174 +1,198 @@
 import discord
 from discord.ext import commands
 import os
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
-from aiohttp import ClientSession
 import asyncio
+import yt_dlp
+from dotenv import load_dotenv
+import urllib.parse
+import urllib.request
+import re
+from aiohttp import ClientSession
 import random
-from youtube_dl import YoutubeDL
 
-# Spotify setup
-SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
-SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+load_dotenv()
 
-spotify_auth = SpotifyClientCredentials(
-    client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
-spotify = spotipy.Spotify(client_credentials_manager=spotify_auth)
+youtube_base_url = 'https://www.youtube.com/'
+youtube_results_url = youtube_base_url + 'results?'
+youtube_watch_url = youtube_base_url + 'watch?v='
 
-# YouTube setup
-ytdl_format_options = {
-    'format': 'bestaudio/best',
-    'restrictfilenames': True,
-    'noplaylist': True,
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': False,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'auto',
-    'source_address': '0.0.0.0'
+yt_dl_options = {
+    "format": "bestaudio/best",
+    "restrictfilenames": True,
+    "noplaylist": True,
+    "nocheckcertificate": True,
+    "ignoreerrors": False,
+    "logtostderr": False,
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "auto",
+    "source_address": "0.0.0.0"
 }
 
 ffmpeg_options = {
-    'options': '-vn'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn -filter:a "volume=0.25"'
 }
 
-ytdl = YoutubeDL(ytdl_format_options)
-
-
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
-        self.data = data
-        self.title = data.get('title')
-        self.url = data.get('url')
-
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-        if 'entries' in data:
-            # take first item from a playlist
-            data = data['entries'][0]
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+ytdl = yt_dlp.YoutubeDL(yt_dl_options)
 
 
 class MusicCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = []
-        self.current = None
-        self.loop = False
+        self.queues = {}
+        self.voice_clients = {}
+        self.current_songs = {}
+        self.loop = {}
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         ]
 
-    async def search_spotify(self, query):
-        results = spotify.search(q=query, type='track', limit=5)
-        tracks = results['tracks']['items']
-        return tracks
-
-    async def send_banner(self, ctx, tracks):
+    async def send_banner(self, ctx, track):
         async with ClientSession(headers={'User-Agent': random.choice(self.user_agents)}) as session:
             async with session.get(f'https://nekos.best/api/v2/music') as resp:
                 data = await resp.json()
-                embed = discord.Embed(title="Tracks found", description="\n".join(
-                    [f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(tracks)]))
-                embed.set_image(url=data['results'][0]['url'])
+                embed = discord.Embed(
+                    title="Now Playing", description=f"{track['title']}")
+                if 'results' in data and len(data['results']) > 0:
+                    embed.set_image(url=data['results'][0]['url'])
                 await ctx.send(embed=embed)
 
-    async def play_music(self, ctx):
-        if not self.queue:
-            await ctx.send("No songs in the queue!")
-            return
-
-        self.current = self.queue.pop(0)
-        voice_channel = ctx.author.voice.channel
-        if ctx.voice_client is None:
-            await voice_channel.connect()
-
-        voice_client = ctx.voice_client
-        voice_client.stop()
-
-        try:
-            query = f"{self.current['name']} {self.current['artists'][0]['name']}"
-            player = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
-            voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(
-                self.play_next(ctx), self.bot.loop))
-            await ctx.send(f"Now playing: {self.current['name']} by {self.current['artists'][0]['name']}")
-        except Exception as e:
-            await ctx.send(f"An error occurred: {str(e)}")
-
     async def play_next(self, ctx):
-        if self.loop:
-            self.queue.append(self.current)
-        if self.queue:
-            await self.play_music(ctx)
+        if ctx.guild.id in self.queues and self.queues[ctx.guild.id]:
+            if self.loop.get(ctx.guild.id, False):
+                self.queues[ctx.guild.id].append(
+                    self.current_songs[ctx.guild.id])
+            next_song = self.queues[ctx.guild.id].pop(0)
+            await self.play_song(ctx, next_song)
         else:
             await ctx.send("Queue is empty. Playback finished.")
+
+    async def play_song(self, ctx, song):
+        try:
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song['url'], download=False))
+
+            song_url = data['url']
+            player = discord.FFmpegOpusAudio(song_url, **ffmpeg_options)
+
+            if ctx.guild.id in self.voice_clients:
+                self.voice_clients[ctx.guild.id].play(
+                    player, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop))
+                self.current_songs[ctx.guild.id] = song
+                await self.send_banner(ctx, song)
+            else:
+                await ctx.send("Not connected to a voice channel.")
+        except Exception as e:
+            await ctx.send(f"An error occurred: {str(e)}")
 
     @commands.command(name='play')
     async def play(self, ctx, *, query):
         await asyncio.sleep(random.uniform(1, 3))  # Add a random delay
-        tracks = await self.search_spotify(query)
-        await self.send_banner(ctx, tracks)
-        self.queue.append(tracks[0])  # Add first track to the queue
-        if not ctx.voice_client or not ctx.voice_client.is_playing():
-            await self.play_music(ctx)
+        if ctx.author.voice is None:
+            await ctx.send("You need to be in a voice channel to use this command.")
+            return
+
+        if ctx.guild.id not in self.voice_clients:
+            voice_client = await ctx.author.voice.channel.connect()
+            self.voice_clients[ctx.guild.id] = voice_client
+
+        search_query = urllib.parse.urlencode({'search_query': query})
+        content = urllib.request.urlopen(youtube_results_url + search_query)
+        search_results = re.findall(
+            r'/watch\?v=(.{11})', content.read().decode())
+        if not search_results:
+            await ctx.send("No results found.")
+            return
+        url = youtube_watch_url + search_results[0]
+
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+
+        track = {
+            'url': url,
+            'title': data['title'],
+        }
+
+        if ctx.guild.id not in self.queues:
+            self.queues[ctx.guild.id] = []
+
+        self.queues[ctx.guild.id].append(track)
+
+        if not self.voice_clients[ctx.guild.id].is_playing():
+            await self.play_song(ctx, track)
+        else:
+            await ctx.send(f"Added to queue: {track['title']}")
 
     @commands.command(name='pause')
     async def pause(self, ctx):
-        if ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
+        if ctx.guild.id in self.voice_clients and self.voice_clients[ctx.guild.id].is_playing():
+            self.voice_clients[ctx.guild.id].pause()
             await ctx.send("Music paused.")
 
     @commands.command(name='resume')
     async def resume(self, ctx):
-        if ctx.voice_client.is_paused():
-            ctx.voice_client.resume()
+        if ctx.guild.id in self.voice_clients and self.voice_clients[ctx.guild.id].is_paused():
+            self.voice_clients[ctx.guild.id].resume()
             await ctx.send("Resuming music.")
 
     @commands.command(name='skip')
     async def skip(self, ctx):
-        if ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+        if ctx.guild.id in self.voice_clients and self.voice_clients[ctx.guild.id].is_playing():
+            self.voice_clients[ctx.guild.id].stop()
             await ctx.send("Skipped to next track.")
 
     @commands.command(name='queue')
     async def queue(self, ctx):
-        if self.queue:
-            await ctx.send("Current Queue:\n" + "\n".join([f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(self.queue)]))
+        if ctx.guild.id in self.queues and self.queues[ctx.guild.id]:
+            queue_list = "\n".join(
+                [f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(self.queues[ctx.guild.id])])
+            await ctx.send(f"Current Queue:\n{queue_list}")
         else:
             await ctx.send("Queue is empty.")
 
+    @commands.command(name='clear_queue')
+    async def clear_queue(self, ctx):
+        if ctx.guild.id in self.queues:
+            self.queues[ctx.guild.id].clear()
+            await ctx.send("Queue cleared!")
+        else:
+            await ctx.send("There is no queue to clear")
+
     @commands.command(name='leave')
     async def leave(self, ctx):
-        if ctx.voice_client:
-            await ctx.voice_client.disconnect()
+        if ctx.guild.id in self.voice_clients:
+            await self.voice_clients[ctx.guild.id].disconnect()
+            del self.voice_clients[ctx.guild.id]
             await ctx.send("Disconnected from voice channel.")
 
     @commands.command(name='join')
     async def join(self, ctx):
         if ctx.author.voice:
             channel = ctx.author.voice.channel
-            await channel.connect()
+            if ctx.guild.id not in self.voice_clients:
+                voice_client = await channel.connect()
+                self.voice_clients[ctx.guild.id] = voice_client
+                await ctx.send(f"Joined {channel.name}")
+            else:
+                await ctx.send("Already connected to a voice channel.")
         else:
             await ctx.send("You need to be in a voice channel to use this command.")
 
     @commands.command(name='loop')
     async def loop(self, ctx):
-        self.loop = not self.loop
-        await ctx.send(f"Loop {'enabled' if self.loop else 'disabled'}.")
+        self.loop[ctx.guild.id] = not self.loop.get(ctx.guild.id, False)
+        await ctx.send(f"Loop {'enabled' if self.loop[ctx.guild.id] else 'disabled'}.")
 
     @commands.command(name='reboot')
     async def reboot(self, ctx):
-        if self.current:
-            await self.play_music(ctx)
+        if ctx.guild.id in self.current_songs:
+            await self.play_song(ctx, self.current_songs[ctx.guild.id])
             await ctx.send("Rebooting current song.")
+        else:
+            await ctx.send("No song is currently playing.")
 
 
 async def setup(bot):
