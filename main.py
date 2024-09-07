@@ -51,7 +51,7 @@ config_manager = ConfigManager('config.json')
 @bot.event
 async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
-    await bot.change_presence(activity=discord.Game(name="local running"))
+    await bot.change_presence(activity=discord.Game(name="🌸 ꜱᴋɪʀᴋ ┊!ʜᴇʟᴘ"))
 
 
 @bot.event
