@@ -88,6 +88,24 @@ class MusicCog(commands.Cog):
         except Exception as e:
             await ctx.send(f"An error occurred: {str(e)}")
 
+    async def get_youtube_results(self, query):
+        search_query = urllib.parse.urlencode({'search_query': query})
+        content = urllib.request.urlopen(youtube_results_url + search_query)
+        search_results = re.findall(
+            r'/watch\?v=(.{11})', content.read().decode())
+        return search_results[:5]  # Return only the first 5 results
+
+    async def get_video_info(self, video_id):
+        url = youtube_watch_url + video_id
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+        return {
+            'url': url,
+            'title': data['title'],
+            'duration': data['duration'],
+            'uploader': data['uploader']
+        }
+
     @commands.command(name='play')
     async def play(self, ctx, *, query):
         await asyncio.sleep(random.uniform(1, 3))  # Add a random delay
@@ -99,32 +117,41 @@ class MusicCog(commands.Cog):
             voice_client = await ctx.author.voice.channel.connect()
             self.voice_clients[ctx.guild.id] = voice_client
 
-        search_query = urllib.parse.urlencode({'search_query': query})
-        content = urllib.request.urlopen(youtube_results_url + search_query)
-        search_results = re.findall(
-            r'/watch\?v=(.{11})', content.read().decode())
+        search_results = await self.get_youtube_results(query)
         if not search_results:
             await ctx.send("No results found.")
             return
-        url = youtube_watch_url + search_results[0]
 
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+        # Get info for each video
+        videos = []
+        for i, video_id in enumerate(search_results, 1):
+            video_info = await self.get_video_info(video_id)
+            videos.append(video_info)
+            await ctx.send(f"{i}. {video_info['title']} - {video_info['uploader']} ({video_info['duration']} seconds)")
 
-        track = {
-            'url': url,
-            'title': data['title'],
-        }
+        # Ask user to choose a video
+        await ctx.send("Please choose a video by entering a number from 1 to 5.")
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit() and 1 <= int(m.content) <= 5
+
+        try:
+            msg = await self.bot.wait_for('message', check=check, timeout=30.0)
+        except asyncio.TimeoutError:
+            await ctx.send("You didn't choose a video in time.")
+            return
+
+        chosen_video = videos[int(msg.content) - 1]
 
         if ctx.guild.id not in self.queues:
             self.queues[ctx.guild.id] = []
 
-        self.queues[ctx.guild.id].append(track)
+        self.queues[ctx.guild.id].append(chosen_video)
 
         if not self.voice_clients[ctx.guild.id].is_playing():
-            await self.play_song(ctx, track)
+            await self.play_song(ctx, chosen_video)
         else:
-            await ctx.send(f"Added to queue: {track['title']}")
+            await ctx.send(f"Added to queue: {chosen_video['title']}")
 
     @commands.command(name='pause')
     async def pause(self, ctx):
@@ -148,7 +175,7 @@ class MusicCog(commands.Cog):
     async def queue(self, ctx):
         if ctx.guild.id in self.queues and self.queues[ctx.guild.id]:
             queue_list = "\n".join(
-                [f"{i+1}. {track['name']} - {track['artists'][0]['name']}" for i, track in enumerate(self.queues[ctx.guild.id])])
+                [f"{i+1}. {track['title']}" for i, track in enumerate(self.queues[ctx.guild.id])])
             await ctx.send(f"Current Queue:\n{queue_list}")
         else:
             await ctx.send("Queue is empty.")
