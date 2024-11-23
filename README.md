@@ -28,13 +28,13 @@ Este es un bot para Discord construido usando `discord.py` y varias extensiones 
    ```
 
 2. Crea un entorno virtual e instálalo:
-   ```python -m venv venv
-   source venv/bin/activate   # En Windows usa `venv\Scripts\activate`
    ```
-3. Instala las dependencias:
+   python -m venv venv && source venv/bin/activate   # En Windows usa `venv\Scripts\activate`
+   ```
+4. Instala las dependencias:
    `pip install -r requirements.txt`
 
-4. Configura el archivo .env en el directorio raíz con tus claves:
+5. Configura el archivo .env en el directorio raíz con tus claves:
    ```
    DISCORD_TOKEN=YOUR_DISCORD_CHANNEL_TOKEN
    OPENAI_API_KEY=YOUR_API_KEY
